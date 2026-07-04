@@ -81,7 +81,7 @@ export async function startStream(
 ): Promise<StreamSession> {
   // 1. HLS playlists get their own pipeline.
   if (isHlsUrl(url)) {
-    const session = await startHls(video, url, (message) =>
+    const session = startHls(video, url, (message) =>
       options?.onFatalError?.({ code: "unsupported-codec", message }),
     );
 
@@ -92,7 +92,7 @@ export async function startStream(
   const probe = await probeStream(url);
 
   if (isHlsUrl(url, probe.contentType)) {
-    const session = await startHls(video, url, (message) =>
+    const session = startHls(video, url, (message) =>
       options?.onFatalError?.({ code: "unsupported-codec", message }),
     );
 

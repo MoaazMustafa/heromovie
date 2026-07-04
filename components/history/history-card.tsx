@@ -61,17 +61,15 @@ export const HistoryCard = memo(function HistoryCard({ entry }: HistoryCardProps
           Resume
         </Button>
         <Tooltip>
-          <Tooltip.Trigger>
-            <Button
-              isIconOnly
-              aria-label={`Remove ${entry.title} from history`}
-              size="sm"
-              variant="danger-soft"
-              onPress={() => removeHistoryEntry(entry.id)}
-            >
-              <TrashIcon size={16} />
-            </Button>
-          </Tooltip.Trigger>
+          <Button
+            isIconOnly
+            aria-label={`Remove ${entry.title} from history`}
+            size="sm"
+            variant="danger-soft"
+            onPress={() => removeHistoryEntry(entry.id)}
+          >
+            <TrashIcon size={16} />
+          </Button>
           <Tooltip.Content>Remove from history</Tooltip.Content>
         </Tooltip>
       </Card.Footer>

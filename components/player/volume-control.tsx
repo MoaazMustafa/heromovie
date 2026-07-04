@@ -24,22 +24,20 @@ export const VolumeControl = memo(function VolumeControl({
   return (
     <div className="group flex items-center gap-1">
       <Tooltip>
-        <Tooltip.Trigger>
-          <Button
-            isIconOnly
-            aria-label={isMuted ? "Unmute" : "Mute"}
-            className="text-white"
-            size="sm"
-            variant="ghost"
-            onPress={onToggleMute}
-          >
-            {effectiveVolume === 0 ? (
-              <VolumeMutedIcon size={20} />
-            ) : (
-              <VolumeHighIcon size={20} />
-            )}
-          </Button>
-        </Tooltip.Trigger>
+        <Button
+          isIconOnly
+          aria-label={isMuted ? "Unmute" : "Mute"}
+          className="text-white"
+          size="sm"
+          variant="ghost"
+          onPress={onToggleMute}
+        >
+          {effectiveVolume === 0 ? (
+            <VolumeMutedIcon size={20} />
+          ) : (
+            <VolumeHighIcon size={20} />
+          )}
+        </Button>
         <Tooltip.Content>{isMuted ? "Unmute (m)" : "Mute (m)"}</Tooltip.Content>
       </Tooltip>
 

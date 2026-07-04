@@ -50,18 +50,16 @@ function IconButton({
 }) {
   return (
     <Tooltip>
-      <Tooltip.Trigger>
-        <Button
-          isIconOnly
-          aria-label={label}
-          className={isActive ? "text-accent" : "text-white"}
-          size="sm"
-          variant="ghost"
-          onPress={onPress}
-        >
-          {children}
-        </Button>
-      </Tooltip.Trigger>
+      <Button
+        isIconOnly
+        aria-label={label}
+        className={isActive ? "text-accent" : "text-white"}
+        size="sm"
+        variant="ghost"
+        onPress={onPress}
+      >
+        {children}
+      </Button>
       <Tooltip.Content>{label}</Tooltip.Content>
     </Tooltip>
   );
@@ -126,18 +124,16 @@ export const PlayerControls = memo(function PlayerControls({
 
         <div className="flex items-center gap-1">
           <Dropdown>
-            <Dropdown.Trigger>
-              <Button
-                aria-label="Playback speed"
-                className="text-white"
-                size="sm"
-                variant="ghost"
-              >
-                <SpeedIcon size={18} />
-                <span className="hidden text-xs sm:inline">
-                  {state.playbackRate}×
-                </span>
-              </Button>
+            {/* Dropdown.Trigger renders its own <button>, so style it directly
+                instead of nesting a Button (invalid DOM). */}
+            <Dropdown.Trigger
+              aria-label="Playback speed"
+              className="button button--sm button--ghost text-white"
+            >
+              <SpeedIcon size={18} />
+              <span className="hidden text-xs sm:inline">
+                {state.playbackRate}×
+              </span>
             </Dropdown.Trigger>
             <Dropdown.Popover>
               <Dropdown.Menu

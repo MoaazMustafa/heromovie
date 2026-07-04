@@ -31,10 +31,15 @@ export function detectCapabilities(): BrowserCapabilities {
   };
 }
 
-/** MIME types (with codecs) that MSE can consume without remuxing. */
+/**
+ * MIME types (with codecs) that MSE can consume without remuxing.
+ *
+ * Note: "video/mp4" is intentionally absent — MSE only accepts *fragmented*
+ * MP4, and HTTP headers can't distinguish fMP4 from plain progressive MP4.
+ * Progressive MP4s play through the native pipeline instead.
+ */
 const MSE_MIME_CANDIDATES: Record<string, string[]> = {
   "video/webm": ['video/webm; codecs="vp9,opus"', 'video/webm; codecs="vp8,vorbis"'],
-  "video/mp4": ['video/mp4; codecs="avc1.42E01E,mp4a.40.2"'],
 };
 
 /**

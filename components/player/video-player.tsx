@@ -47,6 +47,7 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   const [error, setError] = useState<StreamError | null>(null);
   const [engine, setEngine] = useState<PlaybackEngine | null>(null);
   const [viaProxy, setViaProxy] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [hasSubtitles, setHasSubtitles] = useState(false);
 
@@ -55,6 +56,9 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   const hideTimerRef = useRef<number | null>(null);
   const lastSaveRef = useRef(0);
   const probeErrorRef = useRef<string | null>(null);
+  const engineRef = useRef<PlaybackEngine | null>(null);
+  /** True while a session is attached — media errors outside are teardown noise. */
+  const sessionActiveRef = useRef(false);
 
   const capabilities = detectCapabilities();
   const effectiveUrl = viaProxy ? proxiedUrl(url) : url;
@@ -62,44 +66,63 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   usePlayerShortcuts(containerRef, actions, () => state.duration);
   useMediaSession(title, actions);
 
+  /** Resolves when the previous session finished tearing down. */
+  const teardownRef = useRef<Promise<void>>(Promise.resolve());
+
   // ── Streaming lifecycle ───────────────────────────────────────────────────
+  // Sessions are strictly serialized: a new session only attaches after the
+  // previous one has fully disposed. Without this, React StrictMode's
+  // mount → unmount → remount cycle lets the first session's async dispose
+  // wipe the src the second session just set on the shared <video>.
   useEffect(() => {
     const video = videoRef.current;
 
     if (!video) return;
 
-    let session: StreamSession | null = null;
     let cancelled = false;
 
     setError(null);
 
-    startStream(video, effectiveUrl, {
-      maxCacheBytes: settings.maxCacheBytes,
-      onFatalError: (streamError) => {
-        if (!cancelled) setError(streamError);
-      },
-    })
-      .then((started) => {
-        if (cancelled) {
-          started.dispose();
+    const sessionPromise: Promise<StreamSession | null> = (async () => {
+      await teardownRef.current;
 
-          return;
-        }
-        session = started;
-        probeErrorRef.current = started.probe?.error ?? null;
-        setEngine(started.engine);
-      })
-      .catch(() => {
-        if (!cancelled) setError(describeStreamError("unknown"));
+      if (cancelled) return null;
+
+      const started = await startStream(video, effectiveUrl, {
+        maxCacheBytes: settings.maxCacheBytes,
+        onFatalError: (streamError) => {
+          if (!cancelled) setError(streamError);
+        },
       });
+
+      if (cancelled) {
+        started.dispose();
+
+        return null;
+      }
+
+      probeErrorRef.current = started.probe?.error ?? null;
+      engineRef.current = started.engine;
+      sessionActiveRef.current = true;
+      setEngine(started.engine);
+
+      return started;
+    })().catch(() => {
+      if (!cancelled) setError(describeStreamError("unknown"));
+
+      return null;
+    });
 
     return () => {
       cancelled = true;
-      session?.dispose();
+      sessionActiveRef.current = false;
+      teardownRef.current = sessionPromise.then((session) => {
+        session?.dispose();
+      });
     };
     // Intentionally not re-running on settings change mid-playback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveUrl]);
+  }, [effectiveUrl, retryToken]);
 
   // ── Initial player configuration ──────────────────────────────────────────
   useEffect(() => {
@@ -127,8 +150,15 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   const handleMediaError = useCallback(() => {
     const mediaError = videoRef.current?.error;
 
-    // Ignore teardown/abort noise.
+    // Ignore teardown/abort noise and errors while no session is attached
+    // (session swaps clear the src, which fires a spurious error event).
+    if (!sessionActiveRef.current) return;
     if (!mediaError || mediaError.code === MediaError.MEDIA_ERR_ABORTED) return;
+
+    // HLS errors are owned by hls.js (it retries network hiccups and
+    // attempts media recovery itself); our onFatalError callback reports
+    // anything unrecoverable. Raw <video> errors here would double-report.
+    if (engineRef.current === "hls") return;
 
     // Decode errors are codec problems — the proxy can't help.
     if (mediaError.code === MediaError.MEDIA_ERR_DECODE) {
@@ -237,51 +267,12 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
     [videoRef, settings.subtitlesEnabled],
   );
 
-  // ── Error state ───────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <div className="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-2xl border border-separator bg-surface p-6">
-        <Alert className="max-w-lg" status="danger">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>Playback failed</Alert.Title>
-            <Alert.Description>{error.message}</Alert.Description>
-          </Alert.Content>
-        </Alert>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="primary"
-            onPress={() => {
-              setError(null);
-              setViaProxy(false);
-            }}
-          >
-            Try again
-          </Button>
-          {!viaProxy && (
-            <Tooltip>
-              <Tooltip.Trigger>
-                <Button
-                  size="sm"
-                  variant="tertiary"
-                  onPress={() => {
-                    setError(null);
-                    setViaProxy(true);
-                  }}
-                >
-                  Retry via proxy
-                </Button>
-              </Tooltip.Trigger>
-              <Tooltip.Content>
-                Streams the file through this app&apos;s server to bypass CORS
-              </Tooltip.Content>
-            </Tooltip>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // ── Retry handling ────────────────────────────────────────────────────────
+  const retry = useCallback((withProxy: boolean) => {
+    setError(null);
+    setViaProxy(withProxy);
+    setRetryToken((token) => token + 1);
+  }, []);
 
   return (
     // Keyboard shortcuts require focus on the player surface.
@@ -317,6 +308,39 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
         >
           {state.isPlaying ? <PauseIcon size={32} /> : <PlayIcon size={32} />}
         </button>
+      )}
+
+      {/* Error overlay — video stays mounted so retries can reuse it */}
+      {error && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black/80 p-6 backdrop-blur-sm">
+          <Alert className="max-w-lg" status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Playback failed</Alert.Title>
+              <Alert.Description>{error.message}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" onPress={() => retry(false)}>
+              Try again
+            </Button>
+            {!viaProxy && engine !== "hls" && (
+              <Tooltip>
+                <Button
+                  size="sm"
+                  variant="tertiary"
+                  onPress={() => retry(true)}
+                >
+                  Retry via proxy
+                </Button>
+                <Tooltip.Content>
+                  Streams the file through this app&apos;s server to bypass
+                  CORS
+                </Tooltip.Content>
+              </Tooltip>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Buffering overlay */}

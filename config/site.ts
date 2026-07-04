@@ -19,7 +19,7 @@ export const siteConfig = {
     },
   ],
   links: {
-    github: "https://github.com/heroui-inc/heroui",
+    github: "https://github.com/MoaazMustafa/heromovie",
   },
 };
 

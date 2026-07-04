@@ -2,25 +2,37 @@
 
 /**
  * VideoPlayer — orchestrates the streaming engine, the media element and the
- * control overlay. Owns the playback lifecycle:
- *   startStream → resume position → progress recording → cleanup.
+ * control overlay.
+ *
+ * Playback lifecycle: startStream (native-first) → resume position →
+ * progress recording → cleanup. If direct playback fails (CORS-locked file
+ * hosts, blocked redirects), it automatically retries once through the
+ * same-origin /api/proxy route before surfacing an error.
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Alert, Chip, Spinner } from "@heroui/react";
+import { Alert, Button, Chip, Spinner, Tooltip } from "@heroui/react";
 
 import type { StreamError, PlaybackEngine } from "@/types/streaming";
 
-import { startStream, type StreamSession } from "@/services/streaming/stream-engine";
+import { startStream, describeStreamError, type StreamSession } from "@/services/streaming/stream-engine";
 import { useVideoPlayer } from "@/hooks/use-video-player";
 import { usePlayerShortcuts } from "@/hooks/use-player-shortcuts";
 import { useMediaSession } from "@/hooks/use-media-session";
 import { recordProgress } from "@/stores/history-store";
 import { useSettings } from "@/stores/settings-store";
 import { detectCapabilities } from "@/lib/capabilities";
+import { proxiedUrl } from "@/lib/proxy";
 import { PlayerControls } from "@/components/player/player-controls";
+import { PauseIcon, PlayIcon } from "@/components/player/player-icons";
 
 const CONTROLS_HIDE_DELAY_MS = 3000;
 const PROGRESS_SAVE_INTERVAL_MS = 5000;
+
+const ENGINE_LABELS: Record<PlaybackEngine, string> = {
+  mse: "Chunked",
+  native: "Progressive",
+  hls: "HLS",
+};
 
 interface VideoPlayerProps {
   url: string;
@@ -34,6 +46,7 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
 
   const [error, setError] = useState<StreamError | null>(null);
   const [engine, setEngine] = useState<PlaybackEngine | null>(null);
+  const [viaProxy, setViaProxy] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [hasSubtitles, setHasSubtitles] = useState(false);
 
@@ -41,8 +54,10 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   const subtitleUrlRef = useRef<string | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const lastSaveRef = useRef(0);
+  const probeErrorRef = useRef<string | null>(null);
 
   const capabilities = detectCapabilities();
+  const effectiveUrl = viaProxy ? proxiedUrl(url) : url;
 
   usePlayerShortcuts(containerRef, actions, () => state.duration);
   useMediaSession(title, actions);
@@ -56,7 +71,14 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
     let session: StreamSession | null = null;
     let cancelled = false;
 
-    startStream(video, url, { maxCacheBytes: settings.maxCacheBytes })
+    setError(null);
+
+    startStream(video, effectiveUrl, {
+      maxCacheBytes: settings.maxCacheBytes,
+      onFatalError: (streamError) => {
+        if (!cancelled) setError(streamError);
+      },
+    })
       .then((started) => {
         if (cancelled) {
           started.dispose();
@@ -64,10 +86,11 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
           return;
         }
         session = started;
+        probeErrorRef.current = started.probe?.error ?? null;
         setEngine(started.engine);
       })
-      .catch((streamError: StreamError) => {
-        if (!cancelled) setError(streamError);
+      .catch(() => {
+        if (!cancelled) setError(describeStreamError("unknown"));
       });
 
     return () => {
@@ -76,7 +99,7 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
     };
     // Intentionally not re-running on settings change mid-playback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [effectiveUrl]);
 
   // ── Initial player configuration ──────────────────────────────────────────
   useEffect(() => {
@@ -98,7 +121,36 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
 
     return () => video.removeEventListener("loadedmetadata", onLoadedMetadata);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [effectiveUrl]);
+
+  // ── Media element error handling with proxy retry ─────────────────────────
+  const handleMediaError = useCallback(() => {
+    const mediaError = videoRef.current?.error;
+
+    // Ignore teardown/abort noise.
+    if (!mediaError || mediaError.code === MediaError.MEDIA_ERR_ABORTED) return;
+
+    // Decode errors are codec problems — the proxy can't help.
+    if (mediaError.code === MediaError.MEDIA_ERR_DECODE) {
+      setError(describeStreamError("unsupported-codec"));
+
+      return;
+    }
+
+    // First failure on the direct URL → retry through the CORS proxy.
+    if (!viaProxy) {
+      setViaProxy(true);
+
+      return;
+    }
+
+    // Proxy also failed — surface the most specific error we know.
+    if (mediaError.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+      setError(describeStreamError("unsupported-codec"));
+    } else {
+      setError(describeStreamError(probeErrorRef.current ?? "unknown"));
+    }
+  }, [viaProxy, videoRef]);
 
   // ── Progress persistence (throttled) ──────────────────────────────────────
   useEffect(() => {
@@ -188,65 +240,109 @@ export function VideoPlayer({ url, title, initialPosition = 0 }: VideoPlayerProp
   // ── Error state ───────────────────────────────────────────────────────────
   if (error) {
     return (
-      <Alert status="danger">
-        <Alert.Indicator />
-        <Alert.Content>
-          <Alert.Title>Playback failed</Alert.Title>
-          <Alert.Description>{error.message}</Alert.Description>
-        </Alert.Content>
-      </Alert>
+      <div className="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-2xl border border-separator bg-surface p-6">
+        <Alert className="max-w-lg" status="danger">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Playback failed</Alert.Title>
+            <Alert.Description>{error.message}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            onPress={() => {
+              setError(null);
+              setViaProxy(false);
+            }}
+          >
+            Try again
+          </Button>
+          {!viaProxy && (
+            <Tooltip>
+              <Tooltip.Trigger>
+                <Button
+                  size="sm"
+                  variant="tertiary"
+                  onPress={() => {
+                    setError(null);
+                    setViaProxy(true);
+                  }}
+                >
+                  Retry via proxy
+                </Button>
+              </Tooltip.Trigger>
+              <Tooltip.Content>
+                Streams the file through this app&apos;s server to bypass CORS
+              </Tooltip.Content>
+            </Tooltip>
+          )}
+        </div>
+      </div>
     );
   }
 
   return (
+    // Keyboard shortcuts require focus on the player surface.
+    /* eslint-disable jsx-a11y/no-noninteractive-tabindex */
     <div
       ref={containerRef}
       aria-label={`Video player: ${title}`}
-      className="group/player relative w-full overflow-hidden rounded-2xl bg-black shadow-lg outline-none"
-      role="region"
+      className="group/player relative w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      role="application"
       tabIndex={0}
       onDoubleClick={actions.toggleFullscreen}
       onMouseMove={showControls}
       onTouchStart={showControls}
     >
+      {/* Captions are attached dynamically from user-uploaded .vtt files. */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
         ref={videoRef}
         className="aspect-video w-full"
-        crossOrigin="anonymous"
         playsInline
         preload="metadata"
         onClick={actions.togglePlay}
-        onError={() => {
-          const mediaError = videoRef.current?.error;
-
-          if (mediaError?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-            setError({
-              code: "unsupported-codec",
-              message: "This video format isn't supported by your browser.",
-            });
-          }
-        }}
+        onError={handleMediaError}
       />
+
+      {/* Center play/pause flash overlay */}
+      {!state.isWaiting && controlsVisible && (
+        <button
+          aria-label={state.isPlaying ? "Pause" : "Play"}
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/50 p-5 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:scale-110 hover:bg-black/70 group-hover/player:opacity-100"
+          type="button"
+          onClick={actions.togglePlay}
+        >
+          {state.isPlaying ? <PauseIcon size={32} /> : <PlayIcon size={32} />}
+        </button>
+      )}
 
       {/* Buffering overlay */}
       {state.isWaiting && !error && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
           <Spinner aria-label="Buffering" size="lg" />
         </div>
       )}
 
-      {/* Engine badge — visible while controls are shown */}
+      {/* Engine badges — visible while controls are shown */}
       {engine && controlsVisible && (
-        <div className="absolute right-3 top-3">
+        <div className="absolute right-3 top-3 flex gap-1.5">
+          {viaProxy && (
+            <Chip color="warning" size="sm">
+              Proxy
+            </Chip>
+          )}
           <Chip color="accent" size="sm">
-            {engine === "mse" ? "Chunked streaming" : "Progressive streaming"}
+            {ENGINE_LABELS[engine]}
           </Chip>
         </div>
       )}
 
       {/* Control bar */}
       <div
-        className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-300 ${
+        className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300 ${
           controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >

@@ -76,4 +76,4 @@ export interface BufferHealth {
   preloadTarget: number;
 }
 
-export type PlaybackEngine = "mse" | "native";
+export type PlaybackEngine = "mse" | "native" | "hls";

@@ -18,8 +18,10 @@ export const Navbar = () => {
       <header className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-4 px-6">
         <div className="flex items-center gap-4">
           <NextLink className="flex items-center gap-2" href="/">
-            <Logo className="text-accent" />
-            <p className="font-bold text-inherit">HeroMovie</p>
+            <Logo className="text-accent" size={30} />
+            <p className="bg-gradient-to-r from-violet-500 to-fuchsia-500 bg-clip-text text-lg font-extrabold tracking-tight text-transparent">
+              HeroMovie
+            </p>
           </NextLink>
           <ul className="ml-2 hidden gap-4 sm:flex">
             {siteConfig.navItems.map((item) => (

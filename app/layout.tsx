@@ -41,21 +41,19 @@ export default function RootLayout({
         )}
       >
         <Providers themeProps={{ attribute: "class", defaultTheme: "dark" }}>
-          <div className="relative flex flex-col h-screen">
+          <div className="relative flex min-h-screen flex-col">
             <Navbar />
             <main className="container mx-auto max-w-7xl pt-16 px-6 flex-grow">
               {children}
             </main>
-            <footer className="w-full flex items-center justify-center py-3">
-              <a
-                className="flex items-center gap-1 text-current no-underline"
-                href="https://heroui.com?utm_source=next-app-template"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                <span className="text-muted">Powered by</span>
-                <p className="text-accent">HeroUI</p>
-              </a>
+            <footer className="w-full border-t border-separator py-6">
+              <div className="container mx-auto flex max-w-7xl flex-col items-center gap-1 px-6 text-center">
+                <p className="text-sm font-semibold">HeroMovie</p>
+                <p className="text-xs text-muted">
+                  Streams play directly from their source — nothing is uploaded
+                  or stored on a server.
+                </p>
+              </div>
             </footer>
           </div>
         </Providers>

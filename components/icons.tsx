@@ -15,12 +15,22 @@ export const Logo: React.FC<IconSvgProps> = ({
     width={size || width}
     {...props}
   >
-    <path
-      clipRule="evenodd"
-      d="M17.6482 10.1305L15.8785 7.02583L7.02979 22.5499H10.5278L17.6482 10.1305ZM19.8798 14.0457L18.11 17.1983L19.394 19.4511H16.8453L15.1056 22.5499H24.7272L19.8798 14.0457Z"
-      fill="currentColor"
-      fillRule="evenodd"
+    {/* Film clapperboard with play mark */}
+    <rect
+      height="16"
+      rx="3"
+      stroke="currentColor"
+      strokeWidth="2"
+      width="24"
+      x="4"
+      y="10"
     />
+    <path
+      d="M5.2 10.6 26.4 5l1 3.8L6.2 14.4l-1-3.8Z"
+      fill="currentColor"
+      opacity="0.9"
+    />
+    <path d="M13.5 15.5v6l5.5-3-5.5-3Z" fill="currentColor" />
   </svg>
 );
 

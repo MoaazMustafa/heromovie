@@ -50,12 +50,23 @@ export function UrlForm() {
     );
   }, []);
 
+  const SAMPLES = [
+    {
+      label: "Big Buck Bunny (MP4)",
+      url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    },
+    {
+      label: "Live stream demo (HLS)",
+      url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    },
+  ];
+
   return (
     <form
-      className="flex w-full max-w-2xl flex-col gap-2"
+      className="flex w-full max-w-2xl flex-col gap-3"
       onSubmit={play}
     >
-      <div className="flex w-full flex-col gap-2 sm:flex-row">
+      <div className="flex w-full flex-col gap-2 rounded-3xl border border-separator bg-surface/70 p-3 shadow-lg backdrop-blur-md sm:flex-row">
         <TextField
           aria-label="Video URL"
           className="flex-1"
@@ -68,7 +79,7 @@ export function UrlForm() {
           <InputGroup className="h-12">
             <InputGroup.Input
               className="text-base"
-              placeholder="https://example.com/movie.mp4"
+              placeholder="https://example.com/movie.mp4 · .webm · .mkv · .m3u8"
               spellCheck={false}
             />
           </InputGroup>
@@ -91,6 +102,20 @@ export function UrlForm() {
         </p>
       )}
       {!error && warning && <p className="text-sm text-warning">{warning}</p>}
+
+      <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted">
+        <span>Try it:</span>
+        {SAMPLES.map((sample) => (
+          <button
+            key={sample.url}
+            className="rounded-full border border-separator px-3 py-1 transition-colors hover:border-accent hover:text-accent"
+            type="button"
+            onClick={() => handleChange(sample.url)}
+          >
+            {sample.label}
+          </button>
+        ))}
+      </div>
     </form>
   );
 }
